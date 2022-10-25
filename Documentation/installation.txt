@@ -1,0 +1,20 @@
+1. Install Python (Inklude to PATH)
+
+2. Install virtualenv (pip install virtualenv)
+
+3. Open PowerShell from C:\, enter "virtualenv home_automation". 
+   This will create a virtual environment for your data extract script.
+
+4. In PowerShell at "C:\home_automation\", enter "scripts\activate" to avtivate the virtual enviroment. 
+
+5. Create an folder called at: "C:\home_automation\App". Navigate to that app "cd App". 
+
+6. Copy all the program files to the folder App.
+
+7. Install all the requirements from commando "pip install -r requirements.txt
+
+8. In the file "tibber_import.py", update the access token (first row under function main) to your token from Tibber.com.
+
+9. Schedule windows to run tibber_import.py
+
+10. Start server-script with commando: "python server.py" when standing at "C:\home_automation\App" and having the virtual environment activated.
