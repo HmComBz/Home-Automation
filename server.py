@@ -11,7 +11,7 @@ import time
 from datetime import datetime, timedelta
 from win32api import GetSystemMetrics
 
-import shelly_import
+import Exports.shelly_export
 
 # Create logger for imported modules
 logging_modules = logging.getLogger("imported_module")
