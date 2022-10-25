@@ -293,9 +293,13 @@ class MainPanel(wx.Panel):
         axes2 = figure.add_subplot(222)
         axes2.title.set_text('Tibber vs. Unit Consumption')     
         axes2.plot(self.chart_data_unit_details["tibber_dates"], self.chart_data_unit_details["tibber_consumption"], color="#000000")
+        color_count = 0
+        bottom_value = self.create_list_of_zeroes(len(self.chart_data_unit_details["dates"]))
         for unit in self.chart_data_unit_details["units"]:
-            axes2.bar(self.chart_data_unit_details["dates"], self.chart_data_unit_details["units_dict"][unit],
-            color=self.chart_data_unit_details["color_dict"][unit])
+            axes2.bar(self.chart_data_unit_details["dates"], self.chart_data_unit_details["units_dict"][unit], 
+            bottom=bottom_value, color=self.chart_data_unit_details["color_dict"][unit])
+            bottom_value = list(map(add, bottom_value, self.chart_data_unit_details["units_dict"][unit]))
+            color_count += 1
         axes2.set_facecolor('white')
         handles = [plt.Rectangle((0,0),1,1, color=self.chart_data_unit_details["color_dict"][label]) for label in self.chart_data_unit_details["units"]]
         handles.append(mlines.Line2D([], [], marker='_',

@@ -66,9 +66,10 @@ class Unit():
     def get_status(self):
         # Get current status of unit
         try:
-            status = Shelly(self.ipadress).get_settings_plug()
-            self.has_timer = status["has_timer"]
-            self.ison = status["ison"]
+            if self.ipadress != "0.0.0.0":
+                status = Shelly(self.ipadress).get_settings_plug()
+                self.has_timer = status["has_timer"]
+                self.ison = status["ison"]
         except Exception as e:
             logger.error("Failed to import unit status for unit %s: %s" % (self.unit_id, e))
 
@@ -106,7 +107,7 @@ class Unit():
                 logger.info("No consumption data exists for unit %s" % self.unit_id)
         except Exception as e:
             logger.error("Failed to update consumption for unit %s: %s" % (self.unit_id, e))
-        
+
 
 ########################################################################################
 class LeftPanel(wx.Panel):
@@ -118,12 +119,13 @@ class LeftPanel(wx.Panel):
         self.number_of_units = len(self.list_of_units)
         self.parent = parent
         self.SetBackgroundColour((164, 189, 190))
+        self.unit_values = {}
 
         # Create box sizers
         self.main_sizer = wx.BoxSizer(wx.VERTICAL)
         self.bag_sizer = wx.GridBagSizer(3, 2)
         self.unit_sizer = wx.GridBagSizer(self.number_of_units, 2)
-        
+
         # Populate the panel
         self.create_content("first")
 
@@ -135,7 +137,7 @@ class LeftPanel(wx.Panel):
     #------------------------------------------------------------------------------------------
     def create_content(self, status):
         # Create dropdowns for start and end date
-        self.title_dates = wx.StaticText(self, label = "Select your date range:", style = wx.ALIGN_CENTRE) 
+        self.title_dates = wx.StaticText(self, label = "Select your date range:", style = wx.ALIGN_CENTRE)
         self.sDate = wx.adv.GenericDatePickerCtrl(self, size=(120,25),
                                     style = wx.TAB_TRAVERSAL
                                     | wx.adv.DP_DROPDOWN
@@ -210,23 +212,23 @@ class LeftPanel(wx.Panel):
         if unit.ison == True:
             btn1.SetBackgroundColour((255, 255, 255))
         else:
-            btn2.SetBackgroundColour((255, 255, 255))  
+            btn2.SetBackgroundColour((255, 255, 255))
         btn3 = wx.Button(self, label="Details", size=(80,30))
-        
+
         btn1.Bind(wx.EVT_BUTTON, lambda event: self.turn_on(event, unit.unit_id))
         btn2.Bind(wx.EVT_BUTTON, lambda event: self.turn_off(event, unit.unit_id))
         btn3.Bind(wx.EVT_BUTTON, lambda event: self.details(event, unit.unit_id))
 
         # Create labels
-        value = wx.StaticText(self, label = unit.power, style = wx.ALIGN_LEFT, size=(200,40))
+        self.unit_values[unit.unit_id] = wx.StaticText(self, label = unit.power, style = wx.ALIGN_LEFT, size=(200,40))
         font = wx.Font(18, wx.DEFAULT, wx.NORMAL, wx.BOLD)
-        value.SetFont(font)
+        self.unit_values[unit.unit_id].SetFont(font)
         datetime = wx.StaticText(self, label = unit.datestamp, style = wx.ALIGN_LEFT, size=(200,20))
 
         # Add content to sizers
         title_sizer.Add(title, 0, wx.LEFT, 10)
         title_sizer.Add(ip, 0, wx.RIGHT, 10)
-        content_left_sizer.Add(value, 0, wx.LEFT, 20)
+        content_left_sizer.Add(self.unit_values[unit.unit_id], 0, wx.LEFT, 20)
         content_left_sizer.Add(datetime, 0, wx.LEFT, 20)
         content_right_btn_sizer.Add(btn1, 0, wx.RIGHT, 0)
         content_right_btn_sizer.Add(btn2, 0, wx.RIGHT, 0)
@@ -255,7 +257,7 @@ class LeftPanel(wx.Panel):
         self.parent.main_panel.start_date = str(self.start_date)
 
         # Update data
-        self.parent.main_panel.update_overview()        
+        self.parent.main_panel.update_overview()
 
     #-------------------------------------------------------------------------------------------
     def get_end_date(self, event):
@@ -278,6 +280,19 @@ class LeftPanel(wx.Panel):
             unit_dict[row[0]] = Unit(temp_dict)
         logger.info("Unit data successfully imported")
         return unit_dict
+
+    #------------------------------------------------------------------------------------------
+    def on_timer(self):
+        # Import unit list
+        unit_dict = self.import_unit_data()
+
+        # Update values from units
+        for index, row in unit_dict.items():
+            print(row.power)
+            self.unit_values[index] = row.power
+
+        # Wait 10 seconds
+        wx.CallLater(10000, self.on_timer)
 
     #------------------------------------------------------------------------------------------
     def turn_off(self, evt, unit_id):
@@ -303,10 +318,9 @@ class LeftPanel(wx.Panel):
 
         # Set sizers
         self.SetSizerAndFit(self.main_sizer)
-        
+
         # Create new content
         self.create_content("update")
 
         # Set sizers
         self.SetSizerAndFit(self.main_sizer)
-
