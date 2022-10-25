@@ -11,7 +11,7 @@ import time
 from datetime import datetime, timedelta
 from win32api import GetSystemMetrics
 
-import Exports.shelly_export
+from Exports.shelly_export import Shelly
 
 # Create logger for imported modules
 logging_modules = logging.getLogger("imported_module")
@@ -80,7 +80,7 @@ class Server():
             try:
                 if row[4] == "dynamic":
                     # Import data from unit
-                    sh = shelly_import.Shelly(row[3])
+                    sh = Shelly(row[3])
                     consumption_dict[row[0]] = sh.get_status_plug()
                 elif row[4] == "static":
                     power_temp = row[5] * 1000
