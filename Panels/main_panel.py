@@ -1,5 +1,6 @@
 import asyncio
 import calendar
+import configparser
 import logging
 import matplotlib.lines as mlines
 import matplotlib.pyplot as plt
@@ -38,13 +39,17 @@ logger.addHandler(consoleHandler)
 formatter = logging.Formatter('%(asctime)s  %(name)s  %(levelname)s: %(message)s')
 consoleHandler.setFormatter(formatter)
 
+# Import config file
+config = configparser.ConfigParser()
+config.read('config.ini')
+
 # GLOBAL VARS
 x_pos = 0
 y_pos = 0
 x_size = GetSystemMetrics(0)
 y_size = GetSystemMetrics(1)
 left_panel_w = 300
-DATA_PATH = "C:\\Users\\Patrik\\Dropbox\\Patrik\\Home Automation\\Server\\Data\\"
+DATA_PATH = config["PATHS"]["DATA_PATH"]
 colors = ["#8FA6AC", "#8A584C", "#4F583D", "#CEB793", "#85865F", "#F5EACF", "#C39E9E", "#69A6D1", "#94DFFF",
             "#C9EBEF", "#FFD481", "#FCADB0", "#F9D5E5", "#EEAC99", "#E06377", "#C83349", "#5B9AA0", "#D6D44E0", "#B8A9C9",
             "#622569"]

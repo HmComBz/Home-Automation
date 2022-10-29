@@ -1,5 +1,6 @@
 import asyncio
 import calendar
+import configparser
 import logging
 import matplotlib.pyplot as plt
 import numpy as np
@@ -33,8 +34,12 @@ logger.addHandler(consoleHandler)
 formatter = logging.Formatter('%(asctime)s  %(name)s  %(levelname)s: %(message)s')
 consoleHandler.setFormatter(formatter)
 
+# Import config file
+config = configparser.ConfigParser()
+config.read('config.ini')
+
 # GLOBAL VARS
-DATA_PATH = "D:\\Dropbox\\Patrik\\Home Automation\\Server\\Data\\"
+DATA_PATH = config["PATHS"]["DATA_PATH"]
 
 
 class Server():

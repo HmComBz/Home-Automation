@@ -41,7 +41,6 @@ y_pos = 0
 x_size = GetSystemMetrics(0)
 y_size = GetSystemMetrics(1)
 left_panel_w = 300
-DATA_PATH = "C:\\Users\\Patrik\\Dropbox\\Patrik\\Home Automation\\Server\\Data\\"
 
 
 class TopPanel(wx.Panel):

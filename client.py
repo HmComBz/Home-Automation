@@ -44,7 +44,6 @@ y_pos = 0
 x_size = GetSystemMetrics(0)
 y_size = GetSystemMetrics(1)
 left_panel_w = 300
-DATA_PATH = "C:\\Users\\Patrik\\Dropbox\\Patrik\\Home Automation\\Server\\Data\\"
 
 
 ######################################################################################################
@@ -113,16 +112,6 @@ class Panel_root(wx.Panel):
         root_sizer.Add(self.left_panel, 1, wx.EXPAND)
         root_sizer.Add(s, 3, wx.EXPAND)
         self.SetSizer(root_sizer)
-
-        self.Bind(wx.EVT_BUTTON, self.onclic)
-
-    #-------------------------------------------------------------------------------------------------
-    def onclic(self, e):
-        origin = e.GetEventObject().GetName()
-        if origin == 'first button':
-            self.top_panel.update('hello') # note that we use an API...
-        elif origin == 'second button':
-            self.main_panel.update('hello') # ...to avoid direct access
 
 
 if __name__ == "__main__":
