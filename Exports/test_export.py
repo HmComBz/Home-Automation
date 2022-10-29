@@ -5,7 +5,7 @@ import requests
 # Documentation: https://shelly-api-docs.shelly.cloud/gen1/?shell#shelly-plug-plugs-meter-0
 
 # Create loggers for code
-logger = logging.getLogger("Shelly")
+logger = logging.getLogger("Test Export Shelly")
 logger.setLevel(logging.INFO)
 logger.propagate = False
 
@@ -49,15 +49,15 @@ class Shelly():
         d = self.get_data(url)
         return d.json()
 
-    def get_status_3phase(self):
-        # Get status from smart plug s
-        url = "http://%s/status/0" % self.ip
-        d = self.get_data(url)
-        return d.json()
-
     def get_status_plug(self):
         # Get status from smart plug s
         url = "http://%s/meter/0" % self.ip
+        d = self.get_data(url)
+        return d.json()
+
+    def get_status_3phase(self):
+        # Get status from smart plug s
+        url = "http://%s/status/0" % self.ip
         d = self.get_data(url)
         return d.json()
 
@@ -76,5 +76,10 @@ class Shelly():
         url = "http://%s/relay/0" % self.ip
         self.post_data(url, {"turn":"on"})
 
-    
+
+
+
+if __name__ == "__main__":
+    shelly = Shelly("192.168.0.141")
+    print(shelly.get_status_3phase()["emeters"][0]["total"])
     

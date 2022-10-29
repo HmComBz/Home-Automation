@@ -77,6 +77,26 @@ class Server():
             return None
 
     #------------------------------------------------------------------------------------------
+    def calculate_power_consumption(self, consumption_dict, unit_data, last_value):
+        # Calculate the power and since start
+        try:
+            if unit_data[2] == "Energy Meter":
+                power = consumption_dict[unit_data[0]]["power"]
+                since_start = consumption_dict[unit_data[0]]["total"]
+                return power, since_start
+            # If a 3-phase, calculate since start from total, and power based on since start
+            elif unit_data[2] == "Energy Meter 3-phase":   
+                since_start = consumption_dict[unit_data[0]]["emeters"][0]["total"] * 60
+                if last_value != 0:
+                    power = (since_start - last_value) / 60
+                else:
+                    power = 0
+                return power, since_start
+        except Exception as e:
+            logger.error("Failed to calculate power consumption: %s" % e)
+            return None
+
+    #------------------------------------------------------------------------------------------
     def import_consumption_data(self, units):
         # Loop through registered units and extract data, only extract data first
         # to avoid values to be too far from even hour.
@@ -86,7 +106,12 @@ class Server():
                 if row[4] == "dynamic":
                     # Import data from unit
                     sh = Shelly(row[3])
-                    consumption_dict[row[0]] = sh.get_status_plug()
+                    if row[2] == "Energy Meter 3-phase":
+                        consumption_dict[row[0]] = sh.get_status_3phase()
+                    elif row[2] == "Energy Meter":
+                        consumption_dict[row[0]] = sh.get_status_plug()
+                    else:
+                        consumption_dict[row[0]] = {"power":0, "total":0}      
                 elif row[4] == "static":
                     power_temp = row[5] * 1000
                     consumption_dict[row[0]] = {"power":power_temp, "total":row[5]}
@@ -142,13 +167,17 @@ class Server():
 
                 # Exctract data from consumption csv data and create a temporary dict
                 if row[4] == "dynamic":
-                    power = consumption_dict[row[0]]["power"]
-                    since_start = consumption_dict[row[0]]["total"]
+                    power, since_start = self.calculate_power_consumption(consumption_dict, row, last_value)
                     if last_value != 0:
                         last_period = self.calculate_consumption_delta(last_value, time_diff, since_start, row[0])
                     else:
                         # For when no previous data exists, assuming the same power during the whole last hour
-                        last_period = (since_start - power * 60) / (60*1000)
+                        if row[2] == "Energy Meter":    
+                            last_period = (since_start - power * 60) / (60*1000)
+                        elif row[2] == "Energy Meter 3-phase":
+                            last_period = 0
+                        elif:
+                            last_period = 0
                 elif row[4] == "static":
                     power = consumption_dict[row[0]]["power"]
                     if len(unit_history) == 0:
