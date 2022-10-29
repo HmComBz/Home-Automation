@@ -176,7 +176,7 @@ class Server():
                             last_period = (since_start - power * 60) / (60*1000)
                         elif row[2] == "Energy Meter 3-phase":
                             last_period = 0
-                        elif:
+                        else:
                             last_period = 0
                 elif row[4] == "static":
                     power = consumption_dict[row[0]]["power"]
