@@ -108,10 +108,12 @@ class Server():
                     sh = Shelly(row[3])
                     if row[2] == "Energy Meter 3-phase":
                         consumption_dict[row[0]] = sh.get_status_3phase()
+                        logger.info("Consumption data energy meter 3-phase: %s" % consumption_dict[row[0]])
                     elif row[2] == "Energy Meter":
                         consumption_dict[row[0]] = sh.get_status_plug()
+                        logger.info("Consumption data energy meter: %s" % consumption_dict[row[0]])
                     else:
-                        consumption_dict[row[0]] = {"power":0, "total":0}      
+                        consumption_dict[row[0]] = {"power":0, "total":0}   
                 elif row[4] == "static":
                     power_temp = row[5] * 1000
                     consumption_dict[row[0]] = {"power":power_temp, "total":row[5]}
