@@ -12,7 +12,7 @@ import time
 import wx
 import wx.adv
 
-from datetime import datetime
+import datetime
 from matplotlib.figure import Figure
 from matplotlib.ticker import FormatStrFormatter
 from matplotlib.backends.backend_wxagg import FigureCanvasWxAgg as FigureCanvas
@@ -93,10 +93,9 @@ class MainPanel(wx.Panel):
     def calculate_default_date_selection(self):
         # Calculate default date based on current month
         try:
-            #first_day_this_m = datetime.today().replace(day=1)
-            first_date_this_m = datetime(year=datetime.now().year, month=datetime.now().month, day=1)
-            last_day_this_m = calendar.monthrange(datetime.now().year, datetime.now().month)[1]
-            last_date_this_m = datetime(year=datetime.now().year, month=datetime.now().month, day=last_day_this_m)
+            first_date_this_m = datetime.datetime(year=datetime.datetime.now().year, month=datetime.datetime.now().month, day=1)
+            last_day_this_m = calendar.monthrange(datetime.datetime.now().year, datetime.datetime.now().month)[1]
+            last_date_this_m = datetime.datetime(year=datetime.datetime.now().year, month=datetime.datetime.now().month, day=last_day_this_m)
             return first_date_this_m, last_date_this_m
         except Exception as e:
             logger.info("Failed to calculate default date selection: %s" % e)
@@ -106,9 +105,11 @@ class MainPanel(wx.Panel):
     def calculate_unit_details(self):
         # Import unit consumption data
         unit_consumption_data = self.import_unit_consumption_data_csv("unit_details")
+        unit_id_unique = unit_consumption_data["unit_id"].unique().tolist()
 
-        # Import unit data
-        unit_data = self.import_unit_data()
+        # Import unit data for active units
+        unit_data = self.read_unit_data()
+        unit_data = unit_data[unit_data.index.isin(unit_id_unique)]
         
         # Edit data
         unit_list = unit_data["name"].tolist()
@@ -164,7 +165,7 @@ class MainPanel(wx.Panel):
             counter = 0
 
         # Combine datasets
-        combined_data = unit_consumption_data.join(unit_data, on=["unit_id"], how="inner")
+        combined_data = unit_consumption_data.join(unit_data, on=["unit_id"], how="left")
 
         # Create dataset for unit consumption
         unit_consumption = combined_data.groupby(by=["unit_id", "name"]).agg(
@@ -204,7 +205,7 @@ class MainPanel(wx.Panel):
         sizer.Clear(True)
 
     #------------------------------------------------------------------------------------------
-    def create_charts_savings(self):
+    def create_savings_view(self):
         # create charts
         figure = Figure(figsize=((x_size-left_panel_w)/100, (y_size*0.9)/100), facecolor="None")
         figure.subplots_adjust(hspace=0.5, wspace=0.5, bottom=0.15)
@@ -258,16 +259,6 @@ class MainPanel(wx.Panel):
         canvas.mpl_connect("motion_notify_event", self.hover)
         
         return canvas
-
-    #------------------------------------------------------------------------------------------
-    def create_chart(self, x, y):
-        # Create bar chart
-        self.p2 = MatplotPanel(self.sp, x, y)
-
-    #------------------------------------------------------------------------------------------
-    def func(self, pct, allvals):
-        absolute = int(np.round(pct/100.*np.sum(allvals)))
-        return "{:.1f}%\n( {:d} kWh )".format(pct, absolute)
 
     #------------------------------------------------------------------------------------------
     def create_detailed_unit_view(self):
@@ -668,18 +659,24 @@ class MainPanel(wx.Panel):
         if self.start_date is not None and self.end_date is not None:
             try:
                 dataset = dataset.loc[self.start_date:self.end_date]
+                return dataset
             except Exception as e:
                 logger.error("Failed to slice dataset based on users selection for %s: %s" % (parent_func, e))
+                return None  
         else:
             try:
                 start_date, end_date = self.calculate_default_date_selection()
             except Exception as e:
-                logger.error("Failed 2 filter consumption data after date for function %s: %s" % (parent_func, e))
+                logger.error("Failed to calculate start and end date for filter_dataset and %s: %s" % (parent_func, e))
                 start_date, end_date = None, None
             try:
-                #dataset = dataset.loc[start_date:end_date]
-                dataset = dataset[(dataset["timestamp"] >= str(start_date)) & (dataset["timestamp"] <= str(end_date))]
-                return dataset
+                dataset_curr_m = dataset[(dataset["timestamp"] >= str(start_date)) & (dataset["timestamp"] <= str(end_date))]
+                # Check if the dataset is empty or not. If no tibber data exists for current month (like in the beginning),
+                # then go for the previous month
+                if len(dataset_curr_m) == 0:
+                    return dataset
+                else:
+                    return dataset_curr_m
             except Exception as e:
                 logger.error("Failed to slice the dataset for %s: %s" % (parent_func, e))
                 return None
@@ -732,7 +729,6 @@ class MainPanel(wx.Panel):
             unit_consumption_raw["date"] = unit_consumption_raw["date"].astype('datetime64[ns]')
 
             # Add calculated columns
-            
             tibber_raw["date"] = tibber_raw["from"].str[:10]
             tibber_raw["time"] = tibber_raw["from"].str[11:13]
             tibber_raw["time_long"] = tibber_raw["from"].str[11:19]
@@ -747,7 +743,7 @@ class MainPanel(wx.Panel):
             tibber_data.set_index("date", inplace=True)
             if range != "all":
                 tibber_data = self.filter_dataset(tibber_data, "import_tibber_data_csv")
-  
+
             # Import the same time interval as unit consumption data
             if category == "unit_details":
                 start_date, end_date = self.get_min_max_date(tibber_raw, "date", unit_consumption_raw, "date")
@@ -786,17 +782,6 @@ class MainPanel(wx.Panel):
             return None
 
     #------------------------------------------------------------------------------------------
-    def import_unit_data(self):
-        # Import unit data from csv
-        try:
-            unit_data = pd.read_csv("%sunits.csv" % DATA_PATH, delimiter=",")
-            unit_data.sort_values(by="id", ascending=True)
-            unit_data.set_index("id", inplace=True)
-            return unit_data
-        except Exception as e:
-            logger.error("Failed to import unit data from csv: %s" % e)
-
-    #------------------------------------------------------------------------------------------
     def OnExit(self, evt):
         # Close the main window
         try:
@@ -811,7 +796,7 @@ class MainPanel(wx.Panel):
             unit_consumption_data = self.import_unit_consumption_data_csv("unit_details")
             
             # Import unit data
-            unit_data = self.import_unit_data()
+            unit_data = self.read_unit_data()
             units = unit_data["name"].tolist()
 
             # Edit data
@@ -864,13 +849,24 @@ class MainPanel(wx.Panel):
             return None
 
     #------------------------------------------------------------------------------------------
-    def read_tibber_csv(self):
+    def read_unit_data(self):
+        # Import unit data from csv
         try:
-            # Import Tibber data
-            unit_consumption_data = self.import_unit_consumption_data_csv("tibber")
-            tibber_consumption_all = self.import_tibber_data_csv("tibber", "all")
-            tibber_consumption_data = self.import_tibber_data_csv("tibber", "")
+            unit_data = pd.read_csv("%sunits.csv" % DATA_PATH, delimiter=",")
+            unit_data.sort_values(by="id", ascending=True)
+            unit_data.set_index("id", inplace=True)
+            return unit_data
+        except Exception as e:
+            logger.error("Failed to import unit data from csv: %s" % e)
 
+    #------------------------------------------------------------------------------------------
+    def read_tibber_csv(self):
+        # Import Tibber data
+        unit_consumption_data = self.import_unit_consumption_data_csv("tibber")
+        tibber_consumption_all = self.import_tibber_data_csv("tibber", "all")
+        tibber_consumption_data = self.import_tibber_data_csv("tibber", "")
+
+        try:
             # Create dataset for consumption and prices per month
             monthly_data = tibber_consumption_all.groupby(by=["year_month"]).agg(
                 Cost=("cost", "sum"),
@@ -879,7 +875,11 @@ class MainPanel(wx.Panel):
             )
             monthly_data["AvgDailyCost"] = monthly_data["AvgPrice"] * monthly_data["Consumption"]
             monthly_data["DiffVsAverage"] = monthly_data["Cost"] - monthly_data["AvgDailyCost"]
+        except Exception as e:
+            logger.error("Failed to import data montly Tibber data: %s" % e)
+            return {}
 
+        try:
             # Create datasets for consumption and prices per day
             daily_data = tibber_consumption_data.groupby("date").agg(
                 Cost=("cost", "sum"),
@@ -901,7 +901,11 @@ class MainPanel(wx.Panel):
             totals = [i+j for i,j in zip(diffvsmin, diffvsmax)]
             greenBars = [i / j * 100 for i,j in zip(diffvsmax, totals)]
             redBars = [i / j * 100 for i,j in zip(diffvsmin, totals)]
+        except Exception as e:
+            logger.error("Failed to import data for daily Tibber data: %s" % e)
+            return {}
 
+        try:
             # Create dataset for consumption per hour
             hourly_data = tibber_consumption_data.copy()
             hourly_data = self.filter_dataset(hourly_data, "read_tibber_csv")
@@ -912,7 +916,11 @@ class MainPanel(wx.Panel):
             )
             hourly_data["AvgDailyCost"] = hourly_data["AvgPrice"] * hourly_data["Consumption"]
             hourly_data["DiffVsAverage"] = hourly_data["Cost"] - hourly_data["AvgDailyCost"]
+        except Exception as e:
+            logger.error("Failed to import data for daily Tibber data: %s" % e)
+            return {}
 
+        try:
             # Get lists for graphs monthly
             dates_monthly = monthly_data.index.tolist()
             dates_montly_formatted = [int(date) for date in dates_monthly]
@@ -920,7 +928,11 @@ class MainPanel(wx.Panel):
             realcost_monthly = monthly_data["Cost"].tolist()
             avgprice_monthly = monthly_data["AvgPrice"].tolist()
             diffvsaverage_monthly = monthly_data["DiffVsAverage"].tolist()
+        except Exception as e:
+            logger.error("Failed to create lists for montly Tibber data: %s" % e)
+            return {}
 
+        try:
             # Get lists for graphs daily
             dates = daily_data.index.tolist()
             consumption = daily_data["Consumption"].tolist()
@@ -932,7 +944,11 @@ class MainPanel(wx.Panel):
             mindailyprice = daily_data["MinDailyCost"].tolist()
             maxdailyprice = daily_data["MaxDailyCost"].tolist()
             diffvsaverage = daily_data["DiffVsAverage"].tolist()
+        except Exception as e:
+            logger.error("Failed to create lists for daily Tibber data: %s" % e)
+            return {}
 
+        try:
             # Get lists for graphs hourly
             time_hourly = hourly_data.index.tolist()
             cost_hourly = hourly_data["Cost"].tolist()
@@ -940,21 +956,20 @@ class MainPanel(wx.Panel):
             avgprice_hourly = hourly_data["AvgPrice"].tolist()
             avghourprice = hourly_data["AvgDailyCost"].tolist()
             diffvsaveragehour = hourly_data["DiffVsAverage"].tolist()
-
- 
-            return {"dates":dates, "consumption":consumption, "avgprice":avgprice, "minprice":minprice, 
-            "maxprice":maxprice, "avgdailyprice":avgdailyprice, "mindailyprice":mindailyprice, "maxdailyprice":maxdailyprice, 
-            "diffvsaverage":diffvsaverage, "diffvsmin":diffvsmin, "realcost":realcost, "dates_monthly":dates_montly_formatted, 
-            "consumption_monthly":consumption_monthly, "avgprice_monthly":avgprice_monthly,
-            "diffvsaverage_monthly":diffvsaverage_monthly, "realcost_monthly":realcost_monthly,
-            "time_hourly":time_hourly, "consumption_hourly":consumption_hourly, "avgprice_hourly":avgprice_hourly,
-            "avghourprice":avghourprice, "diffvsaveragehour":diffvsaveragehour, "cost_hourly":cost_hourly,
-            "greenBars":greenBars, "redBars":redBars}
-
         except Exception as e:
-            logger.error("Failed to import data from Tibber: %s" % e)
+            logger.error("Failed to create lists for hourly Tibber data: %s" % e)
+            return {}
 
-    #-------------------------------------------------------------------------------------------------
+        return {"dates":dates, "consumption":consumption, "avgprice":avgprice, "minprice":minprice, 
+        "maxprice":maxprice, "avgdailyprice":avgdailyprice, "mindailyprice":mindailyprice, "maxdailyprice":maxdailyprice, 
+        "diffvsaverage":diffvsaverage, "diffvsmin":diffvsmin, "realcost":realcost, "dates_monthly":dates_montly_formatted, 
+        "consumption_monthly":consumption_monthly, "avgprice_monthly":avgprice_monthly,
+        "diffvsaverage_monthly":diffvsaverage_monthly, "realcost_monthly":realcost_monthly,
+        "time_hourly":time_hourly, "consumption_hourly":consumption_hourly, "avgprice_hourly":avgprice_hourly,
+        "avghourprice":avghourprice, "diffvsaveragehour":diffvsaveragehour, "cost_hourly":cost_hourly,
+        "greenBars":greenBars, "redBars":redBars}
+
+    #------------------------------------------------------------------------------------------
     def update_add_unit_form(self):
         # Create form
         add_form = add_unit.CreateForm(self)
@@ -969,7 +984,7 @@ class MainPanel(wx.Panel):
         # Set sizers
         self.SetSizer(self.mainSizer)
 
-    #-------------------------------------------------------------------------------------------------
+    #------------------------------------------------------------------------------------------
     def update_details(self, unit):
         # Import data
         self.chart_data_details = self.read_unit_consumption_csv(unit)
@@ -986,7 +1001,7 @@ class MainPanel(wx.Panel):
         # Set sizers
         self.SetSizer(self.mainSizer)
 
-    #-------------------------------------------------------------------------------------------------
+    #------------------------------------------------------------------------------------------
     def update_overview(self):
         # Import data
         self.chart_data_overview = self.read_tibber_csv()
@@ -1003,13 +1018,13 @@ class MainPanel(wx.Panel):
         # Set sizers
         self.SetSizer(self.mainSizer)
 
-    #-------------------------------------------------------------------------------------------------
+    #------------------------------------------------------------------------------------------
     def update_tibber_details(self):
         # Import data
         self.chart_data_tibber_details = self.read_tibber_csv()
 
         # Create barchart
-        self.canvas1 = self.create_charts_savings()
+        self.canvas1 = self.create_savings_view()
 
         # Clean sizers
         self.clear_sizer(self.visualSizer1)
@@ -1020,7 +1035,7 @@ class MainPanel(wx.Panel):
         # Set sizers
         self.SetSizer(self.mainSizer)
 
-    #-------------------------------------------------------------------------------------------------
+    #------------------------------------------------------------------------------------------
     def update_unit_details(self):
         # Import data
         self.chart_data_unit_details = self.calculate_unit_details()
