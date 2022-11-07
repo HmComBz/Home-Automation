@@ -12,7 +12,7 @@ import time
 import wx
 import wx.adv
 
-import datetime
+from datetime import datetime, timedelta
 from matplotlib.figure import Figure
 from matplotlib.ticker import FormatStrFormatter
 from matplotlib.backends.backend_wxagg import FigureCanvasWxAgg as FigureCanvas
@@ -59,13 +59,18 @@ plt.style.use('ggplot')
 class MainPanel(wx.Panel):
     def __init__(self, parent):
         wx.Panel.__init__(self, parent)
-        self.end_date = None
-        #self.SetBackgroundColour((115, 144, 134))
-        #self.SetBackgroundColour((216, 216, 214))
-        self.SetBackgroundColour((255, 255, 255))
-        self.start_date = None
         self.chart_data_details = {}
         self.chart_data_overview = {}
+        self.end_date = None
+        self.SetBackgroundColour((255, 255, 255))
+        self.start_date = None
+        self.tibber_updated = False
+        self.timestamp_unit_consumption_data = None
+        self.timestamp_tibber_data = None
+        
+        # Import csv data
+        self.data_tibber = self.import_tibber_data_csv()
+        self.data_unit_consumption = self.import_unit_consumption_data_csv()
 
         # Create box sizers
         self.mainSizer = wx.BoxSizer(wx.VERTICAL)
@@ -75,7 +80,7 @@ class MainPanel(wx.Panel):
         self.mainSizer.Add(self.visualSizer1)
 
         # Import data
-        self.chart_data_overview = self.read_tibber_csv()
+        self.chart_data_overview = self.calculate_tibber_data()
 
         # Create barchart
         self.canvas1 = self.create_main_charts()
@@ -93,22 +98,191 @@ class MainPanel(wx.Panel):
     def calculate_default_date_selection(self):
         # Calculate default date based on current month
         try:
-            first_date_this_m = datetime.datetime(year=datetime.datetime.now().year, month=datetime.datetime.now().month, day=1)
-            last_day_this_m = calendar.monthrange(datetime.datetime.now().year, datetime.datetime.now().month)[1]
-            last_date_this_m = datetime.datetime(year=datetime.datetime.now().year, month=datetime.datetime.now().month, day=last_day_this_m)
+            first_date_this_m = datetime(year=datetime.now().year, month=datetime.now().month, day=1)
+            last_day_this_m = calendar.monthrange(datetime.now().year, datetime.now().month)[1]
+            last_date_this_m = datetime(year=datetime.now().year, month=datetime.now().month, day=last_day_this_m)
             return first_date_this_m, last_date_this_m
         except Exception as e:
             logger.info("Failed to calculate default date selection: %s" % e)
             return None, None
 
     #------------------------------------------------------------------------------------------
+    def calculate_tibber_data(self):
+        # Import Tibber data
+        unit_consumption_data = self.slice_dataset("unit_consumption", "tibber", "")
+        tibber_consumption_all = self.slice_dataset("tibber", "tibber", "all")
+        tibber_consumption_data = self.slice_dataset("tibber", "tibber", "")
+
+        try:
+            # Create dataset for consumption and prices per month
+            monthly_data = tibber_consumption_all.groupby(by=["year_month"]).agg(
+                Cost=("cost", "sum"),
+                Consumption=("consumption", "sum"),
+                AvgPrice=("electric_price", "mean")
+            )
+            monthly_data["AvgDailyCost"] = monthly_data["AvgPrice"] * monthly_data["Consumption"]
+            monthly_data["DiffVsAverage"] = monthly_data["Cost"] - monthly_data["AvgDailyCost"]
+        except Exception as e:
+            logger.error("Failed to import data montly Tibber data: %s" % e)
+            return {}
+
+        try:
+            # Create datasets for consumption and prices per day
+            daily_data = tibber_consumption_data.groupby("date").agg(
+                Cost=("cost", "sum"),
+                Consumption=("consumption", "sum"),
+                AvgPrice=("electric_price", "mean"), 
+                MinPrice=("electric_price", "min"),
+                MaxPrice=("electric_price", "max")
+            )
+            daily_data["AvgDailyCost"] = daily_data["AvgPrice"] * daily_data["Consumption"]
+            daily_data["MinDailyCost"] = daily_data["MinPrice"] * daily_data["Consumption"]
+            daily_data["MaxDailyCost"] = daily_data["MaxPrice"] * daily_data["Consumption"]
+            daily_data["DiffVsAverage"] = daily_data["Cost"] - daily_data["AvgDailyCost"]
+            daily_data["DiffVsMin"] = daily_data["Cost"] - daily_data["MinDailyCost"]
+            daily_data["DiffVsMax"] = daily_data["MaxDailyCost"] - daily_data["Cost"]
+
+            # Calculate data for savings detailed
+            diffvsmin = daily_data["DiffVsMin"]
+            diffvsmax = daily_data["DiffVsMax"]
+            totals = [i+j for i,j in zip(diffvsmin, diffvsmax)]
+            greenBars = [i / j * 100 for i,j in zip(diffvsmax, totals)]
+            redBars = [i / j * 100 for i,j in zip(diffvsmin, totals)]
+        except Exception as e:
+            logger.error("Failed to import data for daily Tibber data: %s" % e)
+            return {}
+
+        try:
+            # Create dataset for consumption per hour
+            hourly_data = tibber_consumption_data.copy()
+            hourly_data = self.filter_dataset_by_date_selection(hourly_data, "read_tibber_csv")
+            hourly_data = hourly_data.groupby(by=["time"]).agg(
+                Cost=("cost", "sum"),
+                Consumption=("consumption", "sum"),
+                AvgPrice=("electric_price", "mean")
+            )
+            hourly_data["AvgDailyCost"] = hourly_data["AvgPrice"] * hourly_data["Consumption"]
+            hourly_data["DiffVsAverage"] = hourly_data["Cost"] - hourly_data["AvgDailyCost"]
+        except Exception as e:
+            logger.error("Failed to import data for daily Tibber data: %s" % e)
+            return {}
+
+        try:
+            # Get lists for graphs monthly
+            dates_monthly = monthly_data.index.tolist()
+            dates_montly_formatted = [int(date) for date in dates_monthly]
+            consumption_monthly = monthly_data["Consumption"].tolist()
+            realcost_monthly = monthly_data["Cost"].tolist()
+            avgprice_monthly = monthly_data["AvgPrice"].tolist()
+            diffvsaverage_monthly = monthly_data["DiffVsAverage"].tolist()
+        except Exception as e:
+            logger.error("Failed to create lists for montly Tibber data: %s" % e)
+            return {}
+
+        try:
+            # Get lists for graphs daily
+            dates = daily_data.index.tolist()
+            consumption = daily_data["Consumption"].tolist()
+            realcost = daily_data["Cost"].tolist()
+            avgprice = daily_data["AvgPrice"].tolist()
+            minprice = daily_data["MinPrice"].tolist()
+            maxprice = daily_data["MaxPrice"].tolist()
+            avgdailyprice = daily_data["AvgDailyCost"].tolist()
+            mindailyprice = daily_data["MinDailyCost"].tolist()
+            maxdailyprice = daily_data["MaxDailyCost"].tolist()
+            diffvsaverage = daily_data["DiffVsAverage"].tolist()
+        except Exception as e:
+            logger.error("Failed to create lists for daily Tibber data: %s" % e)
+            return {}
+
+        try:
+            # Get lists for graphs hourly
+            time_hourly = hourly_data.index.tolist()
+            cost_hourly = hourly_data["Cost"].tolist()
+            consumption_hourly = hourly_data["Consumption"].tolist()
+            avgprice_hourly = hourly_data["AvgPrice"].tolist()
+            avghourprice = hourly_data["AvgDailyCost"].tolist()
+            diffvsaveragehour = hourly_data["DiffVsAverage"].tolist()
+        except Exception as e:
+            logger.error("Failed to create lists for hourly Tibber data: %s" % e)
+            return {}
+
+        return {"dates":dates, "consumption":consumption, "avgprice":avgprice, "minprice":minprice, 
+        "maxprice":maxprice, "avgdailyprice":avgdailyprice, "mindailyprice":mindailyprice, "maxdailyprice":maxdailyprice, 
+        "diffvsaverage":diffvsaverage, "diffvsmin":diffvsmin, "realcost":realcost, "dates_monthly":dates_montly_formatted, 
+        "consumption_monthly":consumption_monthly, "avgprice_monthly":avgprice_monthly,
+        "diffvsaverage_monthly":diffvsaverage_monthly, "realcost_monthly":realcost_monthly,
+        "time_hourly":time_hourly, "consumption_hourly":consumption_hourly, "avgprice_hourly":avgprice_hourly,
+        "avghourprice":avghourprice, "diffvsaveragehour":diffvsaveragehour, "cost_hourly":cost_hourly,
+        "greenBars":greenBars, "redBars":redBars}
+
+    #------------------------------------------------------------------------------------------
+    def calculate_unit_consumption(self, unit):
+        try:
+            # Import unit consumption data
+            unit_consumption_data = self.slice_dataset("unit_consumption", "unit_details", "")
+            
+            # Import unit data
+            unit_data = self.import_unit_data_csv()
+            units = unit_data["name"].tolist()
+
+            # Edit data
+            dates_list = unit_consumption_data.index.unique().to_list()
+
+            # Join tables
+            combined_data = unit_consumption_data.join(unit_data, on=["unit_id"], how="inner")
+            combined_data.sort_values(by="datestamp", ascending=True)
+            daily_chart_data = combined_data.groupby(by=["date", "name"]).agg(
+                LastPeriod=("last_period", "sum"),
+            )
+            hourly_chart_data = combined_data.groupby(by=["time", "name"]).agg(
+                LastPeriod=("last_period", "sum"),
+            )
+
+            # Create daily data for selected unit
+            daily_data = combined_data[combined_data["unit_id"] == int(unit)]
+            daily_data = daily_data.groupby(by=["date"]).agg(
+                Consumption=("last_period", "sum"),
+            )
+            daily_consumption = daily_data["Consumption"].to_list()
+            daily_date = daily_data.index.to_list()
+
+            # Create hour data for selected unit
+            hour_data = combined_data[combined_data["unit_id"] == int(unit)]
+            hour_data = hour_data.groupby(by=["time"]).agg(
+                Consumption=("last_period", "sum"),
+            )
+            hour_consumption = hour_data["Consumption"].to_list()
+            hour_labels = hour_data.index.to_list()
+            unit_name = units[int(unit)]
+
+            # Create color list and dict
+            num_units = len(units)
+            color_list = colors[0:num_units]
+            color_dict = dict(zip(units, color_list))
+
+            # Create lists for combined daily graph
+            units_dict = self.create_equal_size_dict(units, dates_list, daily_chart_data, "LastPeriod")
+
+            # Create list for combined hourly graph
+            units_dicts_hours = self.create_equal_size_dict(units, hour_labels, hourly_chart_data, "LastPeriod")
+
+            return {"dates":dates_list, "units_dict":units_dict, "units":units, "colors":color_list,
+            "color_dict":color_dict, "hour_consumption":hour_consumption, "hour_labels":hour_labels,
+            "units_dicts_hours":units_dicts_hours, "unit_name":unit_name, "daily_consumption":daily_consumption,
+            "daily_date":daily_date}
+        except Exception as e:
+            logger.error("Failed to import consumption data: %s" % e)
+            return None
+
+    #------------------------------------------------------------------------------------------
     def calculate_unit_details(self):
         # Import unit consumption data
-        unit_consumption_data = self.import_unit_consumption_data_csv("unit_details")
+        unit_consumption_data = self.slice_dataset("unit_consumption", "tibber", "")
         unit_id_unique = unit_consumption_data["unit_id"].unique().tolist()
 
         # Import unit data for active units
-        unit_data = self.read_unit_data()
+        unit_data = self.import_unit_data_csv()
         unit_data = unit_data[unit_data.index.isin(unit_id_unique)]
         
         # Edit data
@@ -116,7 +290,7 @@ class MainPanel(wx.Panel):
         dates_list = unit_consumption_data.index.unique().to_list()
 
         # Import Tibber data
-        tibber_data = self.import_tibber_data_csv("unit_details", "")
+        tibber_data = self.slice_dataset("tibber", "unit_details", "")
         dates_list_tibber = tibber_data.index.unique().to_list()
         tibber_daily = tibber_data.groupby("date").agg(
                 Consumption=("consumption", "sum"),
@@ -654,15 +828,16 @@ class MainPanel(wx.Panel):
         return temp_dict
 
     #------------------------------------------------------------------------------------------
-    def filter_dataset(self, dataset, parent_func):
-        # Drop rows based on selection
+    def filter_dataset_by_date_selection(self, dataset, parent_func):
+        # If user has selected start and end date, filter that range
         if self.start_date is not None and self.end_date is not None:
             try:
-                dataset = dataset.loc[self.start_date:self.end_date]
+                dataset_curr_m = dataset[(dataset["timestamp"] >= str(start_date)) & (dataset["timestamp"] <= str(end_date))]
                 return dataset
             except Exception as e:
                 logger.error("Failed to slice dataset based on users selection for %s: %s" % (parent_func, e))
-                return None  
+                return None
+        # If no range selected, filter current month
         else:
             try:
                 start_date, end_date = self.calculate_default_date_selection()
@@ -682,15 +857,15 @@ class MainPanel(wx.Panel):
                 return None
            
     #------------------------------------------------------------------------------------------
-    def get_min_max_date(self, dataset1, date_col_1, dataset2, date_col_2):
+    def get_min_max_date(self, dataset1, dataset2):
         # Get min and max date from two datasets
         try:
             min_list = []
             max_list = []
-            min_list.append(dataset1[date_col_1].min())
-            max_list.append(dataset1[date_col_1].max())
-            min_list.append(dataset2[date_col_2].min())
-            max_list.append(dataset2[date_col_2].max())
+            min_list.append(dataset1.index.min())
+            max_list.append(dataset1.index.max())
+            min_list.append(dataset2.index.min())
+            max_list.append(dataset2.index.max())
 
             # Take largetst min and smallest max
             final_min = max(min_list)
@@ -714,142 +889,50 @@ class MainPanel(wx.Panel):
         # Update main panel
         self.update_overview()
 
+        # Update parameter showing status
+        self.tibber_udpated = True
+
         # Message user
         wx.MessageBox("Tibber data imported successfully!", "Download successful" ,wx.OK | wx.ICON_INFORMATION)
 
     #------------------------------------------------------------------------------------------
-    def import_tibber_data_csv(self, category, range):
-        # Import Tibber data
+    def import_tibber_data_csv(self):
+        # Import tibber consumption data from csv
         try:
-            tibber_raw = pd.read_csv("%stibber_consumption.csv" % DATA_PATH)
-            unit_consumption_raw = pd.read_csv("%sconsumption.csv" % DATA_PATH)
-
-            # Format date in consumption data
-            unit_consumption_raw["date"] = unit_consumption_raw["datestamp"].str[:10]
-            unit_consumption_raw["date"] = unit_consumption_raw["date"].astype('datetime64[ns]')
-
-            # Add calculated columns
-            tibber_raw["date"] = tibber_raw["from"].str[:10]
-            tibber_raw["time"] = tibber_raw["from"].str[11:13]
-            tibber_raw["time_long"] = tibber_raw["from"].str[11:19]
-            tibber_raw["timestamp"] = tibber_raw["date"] + " " + tibber_raw["time_long"]
-            tibber_raw["date"] = tibber_raw["date"].astype('datetime64[ns]')
-            tibber_raw["time"] = tibber_raw["time"].astype('int64')
-            
-            tibber_data = tibber_raw.copy()
+            tibber_data = pd.read_csv("%stibber_consumption.csv" % DATA_PATH)
+            tibber_data["date"] = tibber_data["from"].str[:10]
+            tibber_data["time"] = tibber_data["from"].str[11:13]
+            tibber_data["time_long"] = tibber_data["from"].str[11:19]
+            tibber_data["timestamp"] = tibber_data["date"] + " " + tibber_data["time_long"]
+            tibber_data["date"] = tibber_data["date"].astype('datetime64[ns]')
+            tibber_data["time"] = tibber_data["time"].astype('int64')
             tibber_data["consumption"] = tibber_data["consumption"].astype(np.float16)
             tibber_data["electric_price"] = tibber_data["cost"] / tibber_data["consumption"]
             tibber_data["year_month"] = tibber_data["date"].dt.strftime("%Y%m")
             tibber_data.set_index("date", inplace=True)
-            if range != "all":
-                tibber_data = self.filter_dataset(tibber_data, "import_tibber_data_csv")
-
-            # Import the same time interval as unit consumption data
-            if category == "unit_details":
-                start_date, end_date = self.get_min_max_date(tibber_raw, "date", unit_consumption_raw, "date")
-                tibber_data = tibber_data[(tibber_data["timestamp"] >= str(start_date)) & (tibber_data["timestamp"] <= str(end_date))]
+            self.timestamp_tibber_data = datetime.strptime(tibber_data["timestamp"].max(), '%Y-%m-%d %H:%M:%S')
             return tibber_data
         except Exception as e:
-            logger.error("Failed to import Tibber data from csv: %s" % e)
+            logger.error("Failed to import unit data from csv: %s" % e)
 
     #------------------------------------------------------------------------------------------
-    def import_unit_consumption_data_csv(self, category):
+    def import_unit_consumption_data_csv(self):
         # Import unit consumption data from csv
         try:
-            unit_consumption_raw = pd.read_csv("%sconsumption.csv" % DATA_PATH)
-            tibber_raw = pd.read_csv("%stibber_consumption.csv" % DATA_PATH)
-
-            # Format date in tibber data
-            tibber_raw["date"] = tibber_raw["from"].str[:10]
-            tibber_raw["date"] = tibber_raw["date"].astype('datetime64[ns]')
-
-            # Add calculated columns
-            unit_consumption_raw["date"] = unit_consumption_raw["datestamp"].str[:10]
-            unit_consumption_raw["time"] = unit_consumption_raw["datestamp"].str[11:19]
-            unit_consumption_raw["timestamp"] = unit_consumption_raw["date"] + " " + unit_consumption_raw["time"]
-            unit_consumption_raw["date"] = unit_consumption_raw["date"].astype('datetime64[ns]')
-            unit_consumption_data = unit_consumption_raw.copy()
-            unit_consumption_data.set_index("date", inplace=True)
-            unit_consumption_data = self.filter_dataset(unit_consumption_data, "import_unit_consumption_data_csv")
-    
-            # Import the same time interval as unit consumption data
-            if category == "unit_details":
-                start_date, end_date = self.get_min_max_date(tibber_raw, "date", unit_consumption_raw, "date")
-                unit_consumption_data = unit_consumption_data[(unit_consumption_data["timestamp"] >= str(start_date)) & (unit_consumption_data["timestamp"] <= str(end_date))]
-            return unit_consumption_data
+            unit_consumption = pd.read_csv("%sconsumption.csv" % DATA_PATH)
+            unit_consumption["date"] = unit_consumption["datestamp"].str[:10]
+            unit_consumption["time"] = unit_consumption["datestamp"].str[11:19]
+            unit_consumption["timestamp"] = unit_consumption["date"] + " " + unit_consumption["time"]
+            unit_consumption["date"] = unit_consumption["date"].astype('datetime64[ns]')
+            unit_consumption = unit_consumption.copy()
+            unit_consumption.set_index("date", inplace=True)
+            self.timestamp_unit_consumption_data = datetime.strptime(unit_consumption["timestamp"].max(), '%Y-%m-%d %H:%M:%S')
+            return unit_consumption
         except Exception as e:
-            logger.error("Failed to import unit consumption data from csv: %s" % e)
-            return None
+            logger.error("Failed to import unit data from csv: %s" % e)
 
     #------------------------------------------------------------------------------------------
-    def OnExit(self, evt):
-        # Close the main window
-        try:
-            self.Destroy()
-        except Exception as e:
-            logger.error("Failed to destroy main window: %s" % e)
-
-    #------------------------------------------------------------------------------------------
-    def read_unit_consumption_csv(self, unit):
-        try:
-            # Import unit consumption data
-            unit_consumption_data = self.import_unit_consumption_data_csv("unit_details")
-            
-            # Import unit data
-            unit_data = self.read_unit_data()
-            units = unit_data["name"].tolist()
-
-            # Edit data
-            dates_list = unit_consumption_data.index.unique().to_list()
-
-            # Join tables
-            combined_data = unit_consumption_data.join(unit_data, on=["unit_id"], how="inner")
-            combined_data.sort_values(by="datestamp", ascending=True)
-            daily_chart_data = combined_data.groupby(by=["date", "name"]).agg(
-                LastPeriod=("last_period", "sum"),
-            )
-            hourly_chart_data = combined_data.groupby(by=["time", "name"]).agg(
-                LastPeriod=("last_period", "sum"),
-            )
-
-            # Create daily data for selected unit
-            daily_data = combined_data[combined_data["unit_id"] == int(unit)]
-            daily_data = daily_data.groupby(by=["date"]).agg(
-                Consumption=("last_period", "sum"),
-            )
-            daily_consumption = daily_data["Consumption"].to_list()
-            daily_date = daily_data.index.to_list()
-
-            # Create hour data for selected unit
-            hour_data = combined_data[combined_data["unit_id"] == int(unit)]
-            hour_data = hour_data.groupby(by=["time"]).agg(
-                Consumption=("last_period", "sum"),
-            )
-            hour_consumption = hour_data["Consumption"].to_list()
-            hour_labels = hour_data.index.to_list()
-            unit_name = units[int(unit)]
-
-            # Create color list and dict
-            num_units = len(units)
-            color_list = colors[0:num_units]
-            color_dict = dict(zip(units, color_list))
-
-            # Create lists for combined daily graph
-            units_dict = self.create_equal_size_dict(units, dates_list, daily_chart_data, "LastPeriod")
-
-            # Create list for combined hourly graph
-            units_dicts_hours = self.create_equal_size_dict(units, hour_labels, hourly_chart_data, "LastPeriod")
-
-            return {"dates":dates_list, "units_dict":units_dict, "units":units, "colors":color_list,
-            "color_dict":color_dict, "hour_consumption":hour_consumption, "hour_labels":hour_labels,
-            "units_dicts_hours":units_dicts_hours, "unit_name":unit_name, "daily_consumption":daily_consumption,
-            "daily_date":daily_date}
-        except Exception as e:
-            logger.error("Failed to import consumption data: %s" % e)
-            return None
-
-    #------------------------------------------------------------------------------------------
-    def read_unit_data(self):
+    def import_unit_data_csv(self):
         # Import unit data from csv
         try:
             unit_data = pd.read_csv("%sunits.csv" % DATA_PATH, delimiter=",")
@@ -860,114 +943,59 @@ class MainPanel(wx.Panel):
             logger.error("Failed to import unit data from csv: %s" % e)
 
     #------------------------------------------------------------------------------------------
-    def read_tibber_csv(self):
-        # Import Tibber data
-        unit_consumption_data = self.import_unit_consumption_data_csv("tibber")
-        tibber_consumption_all = self.import_tibber_data_csv("tibber", "all")
-        tibber_consumption_data = self.import_tibber_data_csv("tibber", "")
-
+    def OnExit(self, evt):
+        # Close the main window
         try:
-            # Create dataset for consumption and prices per month
-            monthly_data = tibber_consumption_all.groupby(by=["year_month"]).agg(
-                Cost=("cost", "sum"),
-                Consumption=("consumption", "sum"),
-                AvgPrice=("electric_price", "mean")
-            )
-            monthly_data["AvgDailyCost"] = monthly_data["AvgPrice"] * monthly_data["Consumption"]
-            monthly_data["DiffVsAverage"] = monthly_data["Cost"] - monthly_data["AvgDailyCost"]
+            self.Destroy()
         except Exception as e:
-            logger.error("Failed to import data montly Tibber data: %s" % e)
-            return {}
+            logger.error("Failed to destroy main window: %s" % e)
 
+    #------------------------------------------------------------------------------------------
+    def slice_dataset(self, source, category, data_range):
+        # Import Tibber consumption data
         try:
-            # Create datasets for consumption and prices per day
-            daily_data = tibber_consumption_data.groupby("date").agg(
-                Cost=("cost", "sum"),
-                Consumption=("consumption", "sum"),
-                AvgPrice=("electric_price", "mean"), 
-                MinPrice=("electric_price", "min"),
-                MaxPrice=("electric_price", "max")
-            )
-            daily_data["AvgDailyCost"] = daily_data["AvgPrice"] * daily_data["Consumption"]
-            daily_data["MinDailyCost"] = daily_data["MinPrice"] * daily_data["Consumption"]
-            daily_data["MaxDailyCost"] = daily_data["MaxPrice"] * daily_data["Consumption"]
-            daily_data["DiffVsAverage"] = daily_data["Cost"] - daily_data["AvgDailyCost"]
-            daily_data["DiffVsMin"] = daily_data["Cost"] - daily_data["MinDailyCost"]
-            daily_data["DiffVsMax"] = daily_data["MaxDailyCost"] - daily_data["Cost"]
+            # Check if newer consumption data exists, if yes, import new data
+            temp_date = datetime.now() - timedelta(hours=1)
+            if self.timestamp_unit_consumption_data > temp_date:
+                self.data_unit_consumption = self.import_unit_consumption_data_csv()
+                logger.info("New unit consumption data was imported successfully")
 
-            # Calculate data for savings detailed
-            diffvsmin = daily_data["DiffVsMin"]
-            diffvsmax = daily_data["DiffVsMax"]
-            totals = [i+j for i,j in zip(diffvsmin, diffvsmax)]
-            greenBars = [i / j * 100 for i,j in zip(diffvsmax, totals)]
-            redBars = [i / j * 100 for i,j in zip(diffvsmin, totals)]
+            # Check if tibber data has been updated during this session, if yes, update from csv
+            if self.tibber_updated == True:
+                self.data_tibber = self.import_tibber_data_csv()
+                self.tibber_updated = False
+                logger.info("New tibber consumption data was imported successfully")
+            
+            # If all is selected, import all data. If not, filter after user selection
+            if data_range != "all":
+                if source == "tibber":
+                    tibber_data = self.filter_dataset_by_date_selection(self.data_tibber, "import_tibber_data")
+                elif source == "unit_consumption":
+                    unit_consumption_data = self.filter_dataset_by_date_selection(self.data_unit_consumption, "import_unit_consumption_data")
+            else:
+                if source == "tibber":
+                    tibber_data = self.data_tibber
+                elif source == "unit_consumption":
+                    unit_consumption_data = self.data_unit_consumption
+
+            # Import the same time interval as unit consumption data if unit details, else go on with normal dataset
+            if category == "unit_details":
+                print(self.data_tibber)
+                print(self.data_unit_consumption)
+                start_date, end_date = self.get_min_max_date(self.data_tibber, self.data_unit_consumption)
+                if source == "tibber":
+                    tibber_data = tibber_data[(tibber_data["timestamp"] >= str(start_date)) & (tibber_data["timestamp"] <= str(end_date))]
+                    return tibber_data
+                elif source == "unit_consumption":
+                    unit_consumption_data = unit_consumption_data[(unit_consumption_data["timestamp"] >= str(start_date)) & (unit_consumption_data["timestamp"] <= str(end_date))]
+                    return unit_consumption_data
+            else:
+                if source == "tibber":
+                    return tibber_data
+                elif source == "unit_consumption":
+                    return unit_consumption_data
         except Exception as e:
-            logger.error("Failed to import data for daily Tibber data: %s" % e)
-            return {}
-
-        try:
-            # Create dataset for consumption per hour
-            hourly_data = tibber_consumption_data.copy()
-            hourly_data = self.filter_dataset(hourly_data, "read_tibber_csv")
-            hourly_data = hourly_data.groupby(by=["time"]).agg(
-                Cost=("cost", "sum"),
-                Consumption=("consumption", "sum"),
-                AvgPrice=("electric_price", "mean")
-            )
-            hourly_data["AvgDailyCost"] = hourly_data["AvgPrice"] * hourly_data["Consumption"]
-            hourly_data["DiffVsAverage"] = hourly_data["Cost"] - hourly_data["AvgDailyCost"]
-        except Exception as e:
-            logger.error("Failed to import data for daily Tibber data: %s" % e)
-            return {}
-
-        try:
-            # Get lists for graphs monthly
-            dates_monthly = monthly_data.index.tolist()
-            dates_montly_formatted = [int(date) for date in dates_monthly]
-            consumption_monthly = monthly_data["Consumption"].tolist()
-            realcost_monthly = monthly_data["Cost"].tolist()
-            avgprice_monthly = monthly_data["AvgPrice"].tolist()
-            diffvsaverage_monthly = monthly_data["DiffVsAverage"].tolist()
-        except Exception as e:
-            logger.error("Failed to create lists for montly Tibber data: %s" % e)
-            return {}
-
-        try:
-            # Get lists for graphs daily
-            dates = daily_data.index.tolist()
-            consumption = daily_data["Consumption"].tolist()
-            realcost = daily_data["Cost"].tolist()
-            avgprice = daily_data["AvgPrice"].tolist()
-            minprice = daily_data["MinPrice"].tolist()
-            maxprice = daily_data["MaxPrice"].tolist()
-            avgdailyprice = daily_data["AvgDailyCost"].tolist()
-            mindailyprice = daily_data["MinDailyCost"].tolist()
-            maxdailyprice = daily_data["MaxDailyCost"].tolist()
-            diffvsaverage = daily_data["DiffVsAverage"].tolist()
-        except Exception as e:
-            logger.error("Failed to create lists for daily Tibber data: %s" % e)
-            return {}
-
-        try:
-            # Get lists for graphs hourly
-            time_hourly = hourly_data.index.tolist()
-            cost_hourly = hourly_data["Cost"].tolist()
-            consumption_hourly = hourly_data["Consumption"].tolist()
-            avgprice_hourly = hourly_data["AvgPrice"].tolist()
-            avghourprice = hourly_data["AvgDailyCost"].tolist()
-            diffvsaveragehour = hourly_data["DiffVsAverage"].tolist()
-        except Exception as e:
-            logger.error("Failed to create lists for hourly Tibber data: %s" % e)
-            return {}
-
-        return {"dates":dates, "consumption":consumption, "avgprice":avgprice, "minprice":minprice, 
-        "maxprice":maxprice, "avgdailyprice":avgdailyprice, "mindailyprice":mindailyprice, "maxdailyprice":maxdailyprice, 
-        "diffvsaverage":diffvsaverage, "diffvsmin":diffvsmin, "realcost":realcost, "dates_monthly":dates_montly_formatted, 
-        "consumption_monthly":consumption_monthly, "avgprice_monthly":avgprice_monthly,
-        "diffvsaverage_monthly":diffvsaverage_monthly, "realcost_monthly":realcost_monthly,
-        "time_hourly":time_hourly, "consumption_hourly":consumption_hourly, "avgprice_hourly":avgprice_hourly,
-        "avghourprice":avghourprice, "diffvsaveragehour":diffvsaveragehour, "cost_hourly":cost_hourly,
-        "greenBars":greenBars, "redBars":redBars}
+            logger.error("Failed to slice dataset: %s" % e)
 
     #------------------------------------------------------------------------------------------
     def update_add_unit_form(self):
@@ -1004,7 +1032,7 @@ class MainPanel(wx.Panel):
     #------------------------------------------------------------------------------------------
     def update_overview(self):
         # Import data
-        self.chart_data_overview = self.read_tibber_csv()
+        self.chart_data_overview = self.calculate_tibber_data()
 
         # Create barchart
         self.canvas1 = self.create_main_charts()
@@ -1021,7 +1049,7 @@ class MainPanel(wx.Panel):
     #------------------------------------------------------------------------------------------
     def update_tibber_details(self):
         # Import data
-        self.chart_data_tibber_details = self.read_tibber_csv()
+        self.chart_data_tibber_details = self.calculate_tibber_data()
 
         # Create barchart
         self.canvas1 = self.create_savings_view()
