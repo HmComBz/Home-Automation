@@ -172,7 +172,7 @@ class LeftPanel(wx.Panel):
 
         # Loop to create all unit panels
         self.temp_list = []
-        for i in range(0, self.number_of_units):
+        for i in range(0, self.number_of_units-1):
             self.unit_sizer.Add(self.create_unit_boxes(self.list_of_units[i]), flag=wx.EXPAND, pos=(1+i,0), border=15)
 
         # Add all sizers to the main sizer
