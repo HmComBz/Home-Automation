@@ -222,7 +222,6 @@ class MainPanel(wx.Panel):
             # Import unit consumption data
             unit_consumption_data = self.slice_dataset("unit_consumption", "all", "")
             unit_id_unique = unit_consumption_data["unit_id"].unique().tolist()
-            print(unit_id_unique)
             
             # Import unit data
             unit_data = self.import_unit_data_csv()
@@ -989,9 +988,6 @@ class MainPanel(wx.Panel):
         # Update parameter showing status
         self.tibber_udpated = True
 
-        # Message user
-        wx.MessageBox("Tibber data imported successfully!", "Download successful" ,wx.OK | wx.ICON_INFORMATION)
-
     #------------------------------------------------------------------------------------------
     def import_tibber_data_csv(self):
         # Import tibber consumption data from csv
@@ -1054,7 +1050,7 @@ class MainPanel(wx.Panel):
         try:
             # Check if newer consumption data exists, if yes, import new data
             temp_date = datetime.now() - timedelta(hours=1)
-            if self.timestamp_unit_consumption_data > temp_date:
+            if temp_date > self.timestamp_unit_consumption_data:
                 self.data_unit_consumption = self.import_unit_consumption_data_csv()
                 logger.info("New unit consumption data was imported successfully")
 
