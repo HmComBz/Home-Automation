@@ -101,6 +101,7 @@ class Server():
         # Loop through registered units and extract data, only extract data first
         # to avoid values to be too far from even hour.
         consumption_dict = {}
+        errors = 0
         for index, row in units.iterrows():
             try:
                 if row[4] == "dynamic":
@@ -121,7 +122,8 @@ class Server():
                     consumption_dict[row[0]] = {"power":0, "total":0}
             except Exception as e:
                 logger.error("Retrieve data for unit %s failed: %s" % (row[3], e))
-                self.pushover("Retrieve data for unit %s failed: %s" % (row[3], e))
+                errors += 1
+        self.pushover("Data imported from units. %s errors occured." % errors)
 
         # Import consumption data from units
         try:
