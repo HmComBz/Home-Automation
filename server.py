@@ -40,6 +40,8 @@ config.read('config.ini')
 
 # GLOBAL VARS
 DATA_PATH = config["PATHS"]["DATA_PATH"]
+PUSHOVER_TOKEN = os.getenv("PUSHOVER_TOKEN")
+PUSHOVER_USER = os.getenv("PUSHOVER_USER")
 
 
 class Server():
@@ -230,8 +232,8 @@ class Server():
         webpage. The user-key comes from the user account.'''
         try:
             r = requests.post("https://api.pushover.net/1/messages.json", data = {
-              "token": "ax77amfzph7vnxs95f5gr2q298u6eq",
-              "user": "u6584c5ty6g8mgm7jf7nk9ii551gzr",
+              "token": PUSHOVER_TOKEN,
+              "user": PUSHOVER_USER,
               "message": message
             }
             )
