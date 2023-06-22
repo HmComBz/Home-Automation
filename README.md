@@ -9,3 +9,5 @@ So by combining this data I could calculate and visualize:
 2. The gap between the total energy consumption (from the grid) and the consumption from all our meters. This so that we could find things I was not aware of or had forgotten.
 
 We ran this for 6 months and where able to track, plan and reduce our consumption and plan when it happens. 
+
+Instead of using frameworks like Django I decided to use wx.Python and make and Windows app instead since there were no need for it to be shared by others and also it was a long time ago I built something in wx.Python. 
